@@ -15,14 +15,25 @@ interface TradeLog {
   closed_at: string | null;
 }
 
+const REASON_MAP: Record<string, string> = {
+  TP: "止盈",
+  SL: "止损",
+  TRAILING: "追踪止损",
+  TIME: "时间止损",
+  MANUAL: "手动平仓",
+  MARGIN: "保证金止损",
+};
+
 export default function LogsPage() {
   const [logs, setLogs] = useState<TradeLog[]>([]);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
     const load = async () => {
-      const res = await api.getTradeLogs(page);
-      if (res.success) setLogs(res.data as TradeLog[]);
+      try {
+        const res = await api.getTradeLogs(page);
+        if (res.success) setLogs(res.data as TradeLog[]);
+      } catch { /* ignore */ }
     };
     load();
   }, [page]);
@@ -37,12 +48,12 @@ export default function LogsPage() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-xl font-medium text-[#e6edf3]">Trade Logs</h1>
+        <h1 className="text-xl font-medium text-[#e6edf3]">交易日志</h1>
         <button
           onClick={handleExport}
           className="px-4 py-2 bg-[#21262d] text-[#8b949e] rounded text-sm hover:text-[#e6edf3]"
         >
-          Export CSV
+          导出CSV
         </button>
       </div>
 
@@ -50,19 +61,19 @@ export default function LogsPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-[#8b949e] border-b border-[#30363d]">
-              <th className="text-left px-4 py-3">Symbol</th>
-              <th className="text-right px-4 py-3">Entry</th>
-              <th className="text-right px-4 py-3">Leverage</th>
-              <th className="text-right px-4 py-3">PnL</th>
-              <th className="text-center px-4 py-3">Reason</th>
-              <th className="text-right px-4 py-3">Closed At</th>
+              <th className="text-left px-4 py-3">币种</th>
+              <th className="text-right px-4 py-3">开仓价</th>
+              <th className="text-right px-4 py-3">杠杆</th>
+              <th className="text-right px-4 py-3">盈亏</th>
+              <th className="text-center px-4 py-3">平仓原因</th>
+              <th className="text-right px-4 py-3">平仓时间</th>
             </tr>
           </thead>
           <tbody>
             {logs.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-12 text-[#8b949e]">
-                  No trade records yet
+                  暂无交易记录
                 </td>
               </tr>
             ) : (
@@ -80,7 +91,7 @@ export default function LogsPage() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className="px-2 py-0.5 rounded bg-[#21262d] text-[#8b949e] text-xs">
-                      {log.close_reason}
+                      {REASON_MAP[log.close_reason] || log.close_reason}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right text-[#8b949e]">
@@ -98,15 +109,15 @@ export default function LogsPage() {
             disabled={page === 1}
             className="text-sm text-[#8b949e] hover:text-[#e6edf3] disabled:opacity-50"
           >
-            Previous
+            上一页
           </button>
-          <span className="text-sm text-[#8b949e]">Page {page}</span>
+          <span className="text-sm text-[#8b949e]">第 {page} 页</span>
           <button
             onClick={() => setPage(page + 1)}
             disabled={logs.length < 50}
             className="text-sm text-[#8b949e] hover:text-[#e6edf3] disabled:opacity-50"
           >
-            Next
+            下一页
           </button>
         </div>
       </div>

@@ -36,7 +36,7 @@ class StrategyConfigSchema(BaseModel):
     # Scanner parameters
     rsi_threshold: float = Field(default=90, ge=50, le=100)
     rsi_period: int = Field(default=14, ge=5, le=50)
-    kline_interval: str = Field(default="15m", pattern=r"^(1m|5m|15m|1h|4h)$")
+    kline_interval: str = Field(default="1d", pattern=r"^(1m|5m|15m|1h|4h|1d)$")
     min_market_cap_usd: float = Field(default=5e7, ge=1e6, le=1e9)
     min_volume_24h_usd: float = Field(default=1e7, ge=1e6, le=5e7)
     min_depth_ratio: float = Field(default=0.02, ge=0.005, le=0.1)
@@ -48,7 +48,7 @@ class StrategyConfigSchema(BaseModel):
     # Grid parameters
     grid_tiers: list[GridTierSchema] = Field(min_length=2, max_length=8)
     total_margin_per_target: float = Field(default=500, ge=50, le=10000)
-    leverage: int = Field(default=5, ge=1, le=20)
+    leverage: int = Field(default=20, ge=1, le=20)
     order_type: str = Field(default="LIMIT", pattern=r"^(LIMIT|MARKET)$")
 
     # Take profit parameters

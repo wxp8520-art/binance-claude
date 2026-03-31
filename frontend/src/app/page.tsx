@@ -29,14 +29,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     const load = async () => {
-      const [posRes, pnlRes, balRes] = await Promise.all([
-        api.getPositions("ACTIVE"),
-        api.getPnl(pnlPeriod),
-        api.getBalance(),
-      ]);
-      if (posRes.success) setPositions(posRes.data as Position[]);
-      if (pnlRes.success) setPnlData(pnlRes.data as PnlPoint[]);
-      if (balRes.success) setBalance(balRes.data as typeof balance);
+      try {
+        const [posRes, pnlRes, balRes] = await Promise.all([
+          api.getPositions("ACTIVE"),
+          api.getPnl(pnlPeriod),
+          api.getBalance(),
+        ]);
+        if (posRes.success) setPositions(posRes.data as Position[]);
+        if (pnlRes.success) setPnlData(pnlRes.data as PnlPoint[]);
+        if (balRes.success) setBalance(balRes.data as typeof balance);
+      } catch { /* ignore */ }
     };
     load();
     const interval = setInterval(load, 10000);
@@ -47,22 +49,22 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Overview Cards */}
+      {/* 概览卡片 */}
       <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Account Balance" value={`${balance.total_balance.toFixed(2)} U`} />
-        <StatCard label="Active Positions" value={`${positions.length}/5`} />
-        <StatCard label="Today PnL" value="+0.00 U" color="text-[#3fb950]" />
+        <StatCard label="账户余额" value={`${balance.total_balance.toFixed(2)} U`} />
+        <StatCard label="活跃持仓" value={`${positions.length}/5`} />
+        <StatCard label="今日盈亏" value="+0.00 U" color="text-[#3fb950]" />
         <StatCard
-          label="Total PnL"
+          label="总盈亏"
           value={`${totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)} U`}
           color={totalPnl >= 0 ? "text-[#3fb950]" : "text-[#f85149]"}
         />
       </div>
 
-      {/* PnL Chart */}
+      {/* 盈亏曲线 */}
       <div className="bg-[#161b22] rounded-lg border border-[#30363d] p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-[#e6edf3] font-medium">PnL Curve</h2>
+          <h2 className="text-[#e6edf3] font-medium">盈亏曲线</h2>
           <div className="flex gap-2">
             {["24h", "7d", "30d", "ALL"].map((p) => (
               <button
@@ -108,21 +110,21 @@ export default function Dashboard() {
         </ResponsiveContainer>
       </div>
 
-      {/* Active Positions Table */}
+      {/* 活跃持仓表 */}
       <div className="bg-[#161b22] rounded-lg border border-[#30363d] p-6">
-        <h2 className="text-[#e6edf3] font-medium mb-4">Active Positions</h2>
+        <h2 className="text-[#e6edf3] font-medium mb-4">活跃持仓</h2>
         {positions.length === 0 ? (
-          <p className="text-[#8b949e] text-sm">No active positions</p>
+          <p className="text-[#8b949e] text-sm">暂无活跃持仓</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[#8b949e] border-b border-[#30363d]">
-                <th className="text-left py-2">Symbol</th>
-                <th className="text-right py-2">Entry Price</th>
-                <th className="text-right py-2">Current</th>
-                <th className="text-right py-2">PnL%</th>
-                <th className="text-center py-2">Grid</th>
-                <th className="text-right py-2">Action</th>
+                <th className="text-left py-2">币种</th>
+                <th className="text-right py-2">开仓价</th>
+                <th className="text-right py-2">现价</th>
+                <th className="text-right py-2">盈亏%</th>
+                <th className="text-center py-2">网格</th>
+                <th className="text-right py-2">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -146,7 +148,7 @@ export default function Dashboard() {
                         onClick={() => api.closePosition(pos.id)}
                         className="px-3 py-1 bg-[#f85149]/10 text-[#f85149] rounded text-xs hover:bg-[#f85149]/20"
                       >
-                        Close
+                        平仓
                       </button>
                     </td>
                   </tr>

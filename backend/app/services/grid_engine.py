@@ -1,5 +1,6 @@
 """Grid short-selling position opening engine."""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -129,11 +130,27 @@ class GridEngine:
         trigger_price: float,
         config: StrategyConfigSchema,
     ):
-        """Place limit short orders for each grid tier."""
+        """Place grid short orders.
+
+        T1 (first tier): Market order — fills immediately as initial entry.
+        T2+ (subsequent tiers): Limit SELL orders at target prices — fill
+        when price rises to each level (gradual DCA into the short).
+        """
         for tier in sorted(config.grid_tiers, key=lambda t: t.tier_index):
             target_price = trigger_price * (1 + tier.price_increase_pct / 100)
             margin = config.total_margin_per_target * tier.position_ratio
             qty = (margin * config.leverage) / target_price
+            min_qty = exchange.get_min_qty(symbol)
+            if qty < min_qty:
+                logger.warning(
+                    "qty_below_minimum",
+                    symbol=symbol,
+                    tier=tier.tier_index,
+                    qty=qty,
+                    min_qty=min_qty,
+                )
+                await self._mark_grid_entry(position_id, tier.tier_index, "SKIPPED")
+                continue
 
             # Check account balance
             try:
@@ -159,42 +176,81 @@ class GridEngine:
             except Exception as e:
                 logger.warning("balance_check_failed", error=str(e))
 
-            # Place order
+            is_first_tier = (tier.tier_index == config.grid_tiers[0].tier_index)
+
             try:
-                if config.order_type == "LIMIT":
+                if is_first_tier:
+                    # ── T1: Market order for immediate entry ──
+                    order = await exchange.place_market_order(
+                        symbol=symbol,
+                        side="SELL",
+                        quantity=qty,
+                    )
+                    order_id = str(order["orderId"])
+
+                    # Poll for fill confirmation (testnet may delay)
+                    fill_price = float(order.get("avgPrice", 0))
+                    fill_qty = float(order.get("executedQty", 0))
+                    if fill_qty == 0 or fill_price == 0:
+                        for _retry in range(5):
+                            await asyncio.sleep(0.5)
+                            try:
+                                resp = await exchange.get_order_status(symbol, order_id)
+                                if resp.get("status") == "FILLED":
+                                    fill_price = float(resp.get("avgPrice", 0))
+                                    fill_qty = float(resp.get("executedQty", 0))
+                                    if fill_qty > 0 and fill_price > 0:
+                                        break
+                            except Exception:
+                                pass
+
+                    if fill_qty > 0 and fill_price > 0:
+                        await self._fill_grid_entry(
+                            position_id, tier.tier_index, order_id,
+                            fill_price, fill_qty,
+                        )
+                        logger.info(
+                            "t1_filled",
+                            symbol=symbol,
+                            price=fill_price,
+                            qty=fill_qty,
+                            order_id=order_id,
+                        )
+                        await ws_manager.broadcast("grid_entry_filled", {
+                            "position_id": position_id,
+                            "tier": tier.tier_index,
+                            "filled_price": fill_price,
+                            "filled_qty": fill_qty,
+                        })
+                    else:
+                        await self._update_grid_entry(
+                            position_id, tier.tier_index, order_id=order_id
+                        )
+                        logger.warning(
+                            "t1_fill_pending",
+                            symbol=symbol,
+                            order_id=order_id,
+                        )
+                else:
+                    # ── T2+: Limit order at target price ──
                     order = await exchange.place_limit_order(
                         symbol=symbol,
                         side="SELL",
                         quantity=qty,
                         price=target_price,
                     )
-                else:
-                    order = await exchange.place_market_order(
-                        symbol=symbol,
-                        side="SELL",
-                        quantity=qty,
+                    order_id = str(order["orderId"])
+                    await self._update_grid_entry(
+                        position_id, tier.tier_index, order_id=order_id
                     )
-
-                order_id = str(order["orderId"])
-                await self._update_grid_entry(
-                    position_id, tier.tier_index, order_id=order_id
-                )
-
-                logger.info(
-                    "grid_order_placed",
-                    symbol=symbol,
-                    tier=tier.tier_index,
-                    price=target_price,
-                    qty=qty,
-                    order_id=order_id,
-                )
-
-                await ws_manager.broadcast("grid_entry_filled", {
-                    "position_id": position_id,
-                    "tier": tier.tier_index,
-                    "price": target_price,
-                    "qty": qty,
-                })
+                    logger.info(
+                        "grid_limit_placed",
+                        symbol=symbol,
+                        tier=tier.tier_index,
+                        price=target_price,
+                        qty=qty,
+                        order_id=order_id,
+                    )
 
             except Exception as e:
                 logger.error(
@@ -218,38 +274,40 @@ class GridEngine:
             waiting_entries = result.scalars().all()
 
             for entry in waiting_entries:
-                if current_price >= float(entry.target_price):
-                    try:
-                        order_status = await exchange.get_order_status(
-                            symbol, entry.order_id
-                        )
-                        if order_status["status"] == "FILLED":
-                            entry.status = "FILLED"
-                            entry.filled_price = float(order_status.get("avgPrice", entry.target_price))
-                            entry.filled_qty = float(order_status.get("executedQty", 0))
-                            entry.filled_at = datetime.now(timezone.utc)
-                            await db.commit()
+                # Check all waiting orders — market orders can fill at any price
+                try:
+                    order_status = await exchange.get_order_status(
+                        symbol, entry.order_id
+                    )
+                    if order_status["status"] == "FILLED":
+                        fill_price = float(order_status.get("avgPrice", 0))
+                        fill_qty = float(order_status.get("executedQty", 0))
+                        entry.status = "FILLED"
+                        entry.filled_price = fill_price if fill_price > 0 else float(entry.target_price)
+                        entry.filled_qty = fill_qty
+                        entry.filled_at = datetime.now(timezone.utc)
+                        await db.commit()
 
-                            await ws_manager.broadcast("grid_entry_filled", {
-                                "position_id": position_id,
-                                "tier": entry.tier_index,
-                                "filled_price": entry.filled_price,
-                                "filled_qty": entry.filled_qty,
-                            })
+                        await ws_manager.broadcast("grid_entry_filled", {
+                            "position_id": position_id,
+                            "tier": entry.tier_index,
+                            "filled_price": entry.filled_price,
+                            "filled_qty": entry.filled_qty,
+                        })
 
-                            logger.info(
-                                "grid_entry_filled",
-                                position_id=position_id,
-                                tier=entry.tier_index,
-                                price=entry.filled_price,
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            "fill_check_error",
+                        logger.info(
+                            "grid_entry_filled",
                             position_id=position_id,
                             tier=entry.tier_index,
-                            error=str(e),
+                            price=entry.filled_price,
                         )
+                except Exception as e:
+                    logger.warning(
+                        "fill_check_error",
+                        position_id=position_id,
+                        tier=entry.tier_index,
+                        error=str(e),
+                    )
 
     async def _update_grid_entry(
         self, position_id: str, tier_index: int, order_id: str
@@ -264,6 +322,28 @@ class GridEngine:
             entry = result.scalar_one_or_none()
             if entry:
                 entry.order_id = order_id
+                await db.commit()
+
+    async def _fill_grid_entry(
+        self, position_id: str, tier_index: int, order_id: str,
+        filled_price: float, filled_qty: float,
+    ):
+        """Mark a grid entry as immediately filled (for market orders)."""
+        now = datetime.now(timezone.utc)
+        async with async_session() as db:
+            result = await db.execute(
+                select(GridEntryModel).where(
+                    GridEntryModel.position_id == position_id,
+                    GridEntryModel.tier_index == tier_index,
+                )
+            )
+            entry = result.scalar_one_or_none()
+            if entry:
+                entry.order_id = order_id
+                entry.status = "FILLED"
+                entry.filled_price = filled_price
+                entry.filled_qty = filled_qty
+                entry.filled_at = now
                 await db.commit()
 
     async def _mark_grid_entry(self, position_id: str, tier_index: int, status: str):

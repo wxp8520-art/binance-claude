@@ -26,12 +26,14 @@ export default function TopBar() {
 
   useEffect(() => {
     const fetchStatus = async () => {
-      const [statusRes, balanceRes] = await Promise.all([
-        api.getSystemStatus(),
-        api.getBalance(),
-      ]);
-      if (statusRes.success) setSystemStatus(statusRes.data as SystemStatus);
-      if (balanceRes.success) setBalance(balanceRes.data as Balance);
+      try {
+        const [statusRes, balanceRes] = await Promise.all([
+          api.getSystemStatus(),
+          api.getBalance(),
+        ]);
+        if (statusRes.success) setSystemStatus(statusRes.data as SystemStatus);
+        if (balanceRes.success) setBalance(balanceRes.data as Balance);
+      } catch { /* ignore */ }
     };
     fetchStatus();
     const interval = setInterval(fetchStatus, 10000);
@@ -41,19 +43,19 @@ export default function TopBar() {
   return (
     <header className="h-14 bg-[#161b22] border-b border-[#30363d] flex items-center justify-between px-6">
       <div className="flex items-center gap-4">
-        {/* Status indicator */}
+        {/* 状态指示 */}
         <div className="flex items-center gap-2">
           <div
             className={`w-2.5 h-2.5 rounded-full ${
               statusColors[systemStatus?.status || "error"] || statusColors.error
             } animate-pulse`}
           />
-          <span className="text-sm text-[#8b949e] capitalize">
-            {systemStatus?.status || "loading"}
+          <span className="text-sm text-[#8b949e]">
+            {systemStatus?.status === "running" ? "运行中" : systemStatus?.status === "paused" ? "已暂停" : systemStatus?.status === "error" ? "异常" : "加载中"}
           </span>
         </div>
 
-        {/* Mode badge */}
+        {/* 模式标签 */}
         <span
           className={`px-2 py-0.5 rounded text-xs font-medium ${
             systemStatus?.mode === "live"
@@ -61,19 +63,19 @@ export default function TopBar() {
               : "bg-[#d29922]/20 text-[#d29922]"
           }`}
         >
-          {systemStatus?.mode === "live" ? "LIVE" : "TESTNET"}
+          {systemStatus?.mode === "live" ? "实盘" : "模拟"}
         </span>
       </div>
 
       <div className="flex items-center gap-6 text-sm">
         <div>
-          <span className="text-[#8b949e]">Balance: </span>
+          <span className="text-[#8b949e]">余额: </span>
           <span className="text-[#e6edf3] font-mono">
             {balance?.total_balance?.toFixed(2) || "0.00"} U
           </span>
         </div>
         <div>
-          <span className="text-[#8b949e]">Today PnL: </span>
+          <span className="text-[#8b949e]">今日盈亏: </span>
           <span className="text-[#3fb950] font-mono">+0.00 U</span>
         </div>
       </div>

@@ -176,8 +176,16 @@ class ScannerEngine:
                 continue
 
             # All filters passed
+            change_pct = float(ticker.get("priceChangePercent", 0))
             passed_symbols.append({"symbol": symbol, "price": price, "rsi": rsi})
-            details.append({"symbol": symbol, "passed": True})
+            details.append({
+                "symbol": symbol,
+                "passed": True,
+                "price": price,
+                "rsi": round(rsi, 1),
+                "change_pct": round(change_pct, 2),
+                "volume_24h": round(volume_24h, 0),
+            })
             active_count += 1
 
         # Save scan log

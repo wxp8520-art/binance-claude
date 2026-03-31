@@ -4,12 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: "chart" },
-  { href: "/config", label: "Strategy Config", icon: "settings" },
-  { href: "/scanner", label: "Scanner", icon: "search" },
-  { href: "/positions", label: "Positions", icon: "layers" },
-  { href: "/logs", label: "Trade Logs", icon: "list" },
-  { href: "/system", label: "System", icon: "cpu" },
+  { href: "/", label: "仪表盘", icon: "chart" },
+  { href: "/config", label: "策略配置", icon: "settings" },
+  { href: "/scanner", label: "标的监控", icon: "search" },
+  { href: "/positions", label: "持仓管理", icon: "layers" },
+  { href: "/logs", label: "交易日志", icon: "list" },
+  { href: "/system", label: "系统设置", icon: "cpu" },
 ];
 
 const icons: Record<string, string> = {
@@ -25,11 +25,11 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <nav className="w-16 hover:w-48 transition-all duration-200 bg-[#161b22] border-r border-[#30363d] flex flex-col group overflow-hidden">
+    <nav className="w-48 md:w-48 max-md:w-16 max-md:hover:w-48 transition-all duration-200 bg-[#161b22] border-r border-[#30363d] flex flex-col group overflow-hidden">
       <div className="p-4 border-b border-[#30363d]">
         <span className="text-[#58a6ff] font-bold text-lg">SG</span>
-        <span className="ml-2 text-[#e6edf3] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-          Grid Bot
+        <span className="ml-2 text-[#e6edf3] max-md:opacity-0 max-md:group-hover:opacity-100 transition-opacity whitespace-nowrap">
+          网格做空
         </span>
       </div>
       <div className="flex-1 py-4">
@@ -48,7 +48,7 @@ export default function Sidebar() {
               <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
                 <path d={icons[item.icon]} />
               </svg>
-              <span className="ml-3 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap text-sm">
+              <span className="ml-3 max-md:opacity-0 max-md:group-hover:opacity-100 transition-opacity whitespace-nowrap text-sm">
                 {item.label}
               </span>
             </Link>

@@ -47,7 +47,7 @@ interface StrategyConfig {
 const DEFAULT_CONFIG: StrategyConfig = {
   rsi_threshold: 90,
   rsi_period: 14,
-  kline_interval: "15m",
+  kline_interval: "1d",
   min_market_cap_usd: 50000000,
   min_volume_24h_usd: 10000000,
   min_depth_ratio: 0.02,
@@ -62,7 +62,7 @@ const DEFAULT_CONFIG: StrategyConfig = {
     { tier_index: 4, price_increase_pct: 80, position_ratio: 0.4 },
   ],
   total_margin_per_target: 500,
-  leverage: 5,
+  leverage: 20,
   order_type: "LIMIT",
   tp_tiers: [
     { tier_index: 1, profit_trigger_pct: 400, close_ratio: 0.5 },
@@ -81,22 +81,23 @@ const DEFAULT_CONFIG: StrategyConfig = {
   consecutive_loss_pause_min: 60,
 };
 
-const KLINE_OPTIONS = ["1m", "5m", "15m", "1h", "4h"];
+const KLINE_OPTIONS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
 export default function ConfigPage() {
   const [config, setConfig] = useState<StrategyConfig>(DEFAULT_CONFIG);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [blacklistInput, setBlacklistInput] = useState("");
-  const [leverageConfirm, setLeverageConfirm] = useState(false);
-  const [pendingLeverage, setPendingLeverage] = useState(5);
+  // leverage confirm removed — direct input
 
   useEffect(() => {
     const load = async () => {
-      const res = await api.getConfig();
-      if (res.success && res.data) {
-        setConfig((res.data as { config: StrategyConfig }).config);
-      }
+      try {
+        const res = await api.getConfig();
+        if (res.success && res.data) {
+          setConfig((res.data as { config: StrategyConfig }).config);
+        }
+      } catch { /* ignore */ }
     };
     load();
   }, []);
@@ -119,9 +120,9 @@ export default function ConfigPage() {
     setMessage("");
     const res = await api.updateConfig(config);
     if (res.success) {
-      setMessage("Configuration saved successfully");
+      setMessage("配置已保存");
     } else {
-      setMessage(`Error: ${res.error}`);
+      setMessage(`错误: ${res.error}`);
     }
     setSaving(false);
     setTimeout(() => setMessage(""), 3000);
@@ -194,17 +195,16 @@ export default function ConfigPage() {
   };
 
   const handleLeverageChange = (val: number) => {
-    setPendingLeverage(val);
-    setLeverageConfirm(true);
+    updateField("leverage", Math.min(20, Math.max(1, val)));
   };
 
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex justify-between items-center">
-        <h1 className="text-xl font-medium text-[#e6edf3]">Strategy Configuration</h1>
+        <h1 className="text-xl font-medium text-[#e6edf3]">策略配置</h1>
         <div className="flex items-center gap-3">
           {message && (
-            <span className={`text-sm ${message.includes("Error") ? "text-[#f85149]" : "text-[#3fb950]"}`}>
+            <span className={`text-sm ${message.includes("错误") ? "text-[#f85149]" : "text-[#3fb950]"}`}>
               {message}
             </span>
           )}
@@ -217,28 +217,28 @@ export default function ConfigPage() {
                 : "bg-[#21262d] text-[#8b949e] cursor-not-allowed"
             }`}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "保存中..." : "保存"}
           </button>
         </div>
       </div>
 
-      {/* Scanner Parameters */}
-      <Section title="Scanner Parameters">
+      {/* 筛选参数 */}
+      <Section title="筛选参数">
         <div className="grid grid-cols-2 gap-4">
           <SliderInput
-            label="RSI Threshold"
+            label="RSI 阈值"
             value={config.rsi_threshold}
             min={50} max={100}
             onChange={(v) => updateField("rsi_threshold", v)}
           />
           <SliderInput
-            label="RSI Period"
+            label="RSI 周期"
             value={config.rsi_period}
             min={5} max={50} step={1}
             onChange={(v) => updateField("rsi_period", v)}
           />
           <div>
-            <label className="text-[#8b949e] text-xs block mb-1">K-Line Interval</label>
+            <label className="text-[#8b949e] text-xs block mb-1">K线周期</label>
             <div className="flex gap-1">
               {KLINE_OPTIONS.map((opt) => (
                 <button
@@ -256,43 +256,43 @@ export default function ConfigPage() {
             </div>
           </div>
           <SliderInput
-            label="Min Market Cap (USD)"
+            label="最低市值 (USD)"
             value={config.min_market_cap_usd}
             min={1000000} max={1000000000} step={1000000}
             format={(v) => `${(v / 1e6).toFixed(0)}M`}
             onChange={(v) => updateField("min_market_cap_usd", v)}
           />
           <SliderInput
-            label="Min 24h Volume (USD)"
+            label="最低24h成交额 (USD)"
             value={config.min_volume_24h_usd}
             min={1000000} max={50000000} step={1000000}
             format={(v) => `${(v / 1e6).toFixed(0)}M`}
             onChange={(v) => updateField("min_volume_24h_usd", v)}
           />
           <SliderInput
-            label="Min Depth Ratio"
+            label="最低深度比"
             value={config.min_depth_ratio}
             min={0.005} max={0.1} step={0.005}
             format={(v) => `${(v * 100).toFixed(1)}%`}
             onChange={(v) => updateField("min_depth_ratio", v)}
           />
           <SliderInput
-            label="Scan Interval (sec)"
+            label="扫描间隔 (秒)"
             value={config.scan_interval_sec}
             min={30} max={600} step={10}
             onChange={(v) => updateField("scan_interval_sec", v)}
           />
           <SliderInput
-            label="Max Concurrent Positions"
+            label="最大同时持仓数"
             value={config.max_concurrent_positions}
             min={1} max={20} step={1}
             onChange={(v) => updateField("max_concurrent_positions", v)}
           />
         </div>
 
-        {/* Blacklist */}
+        {/* 黑名单 */}
         <div className="mt-4">
-          <label className="text-[#8b949e] text-xs block mb-1">Blacklist</label>
+          <label className="text-[#8b949e] text-xs block mb-1">黑名单</label>
           <div className="flex flex-wrap gap-2 mb-2">
             {config.blacklist.map((sym) => (
               <span key={sym} className="bg-[#21262d] px-2 py-1 rounded text-xs text-[#e6edf3] flex items-center gap-1">
@@ -309,23 +309,23 @@ export default function ConfigPage() {
               value={blacklistInput}
               onChange={(e) => setBlacklistInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addBlacklist()}
-              placeholder="e.g. BTCUSDT"
+              placeholder="例如 BTCUSDT"
               className="bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-sm text-[#e6edf3] w-40"
             />
-            <button onClick={addBlacklist} className="text-[#58a6ff] text-sm hover:underline">+ Add</button>
+            <button onClick={addBlacklist} className="text-[#58a6ff] text-sm hover:underline">+ 添加</button>
           </div>
         </div>
       </Section>
 
-      {/* Grid Configuration */}
-      <Section title="Grid Configuration">
+      {/* 网格配置 */}
+      <Section title="网格配置">
         <table className="w-full text-sm mb-3">
           <thead>
             <tr className="text-[#8b949e] border-b border-[#30363d]">
               <th className="text-left py-2 w-12">#</th>
-              <th className="text-left py-2">Price Increase %</th>
-              <th className="text-left py-2">Position Ratio %</th>
-              <th className="text-right py-2 w-12">Action</th>
+              <th className="text-left py-2">价格涨幅 %</th>
+              <th className="text-left py-2">仓位比例 %</th>
+              <th className="text-right py-2 w-12">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -360,7 +360,7 @@ export default function ConfigPage() {
                     className="text-[#f85149] hover:text-[#f85149]/80 text-xs"
                     disabled={config.grid_tiers.length <= 2}
                   >
-                    Del
+                    删除
                   </button>
                 </td>
               </tr>
@@ -374,16 +374,16 @@ export default function ConfigPage() {
             disabled={config.grid_tiers.length >= 8}
             className="text-[#58a6ff] text-sm hover:underline disabled:text-[#8b949e]"
           >
-            + Add Tier
+            + 添加档位
           </button>
           <span className={`text-sm ${gridValid ? "text-[#3fb950]" : "text-[#f85149]"}`}>
-            Total: {(gridTotalRatio * 100).toFixed(0)}% {gridValid ? "OK" : "(must be 100%)"}
+            合计: {(gridTotalRatio * 100).toFixed(0)}% {gridValid ? "OK" : "(须为100%)"}
           </span>
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-4">
           <div>
-            <label className="text-[#8b949e] text-xs block mb-1">Margin per Target (USDT)</label>
+            <label className="text-[#8b949e] text-xs block mb-1">每标的保证金 (USDT)</label>
             <input
               type="number"
               value={config.total_margin_per_target}
@@ -393,7 +393,7 @@ export default function ConfigPage() {
             />
           </div>
           <div>
-            <label className="text-[#8b949e] text-xs block mb-1">Leverage</label>
+            <label className="text-[#8b949e] text-xs block mb-1">杠杆倍数</label>
             <input
               type="number"
               value={config.leverage}
@@ -403,7 +403,7 @@ export default function ConfigPage() {
             />
           </div>
           <div>
-            <label className="text-[#8b949e] text-xs block mb-1">Order Type</label>
+            <label className="text-[#8b949e] text-xs block mb-1">订单类型</label>
             <div className="flex gap-1">
               {["LIMIT", "MARKET"].map((t) => (
                 <button
@@ -415,7 +415,7 @@ export default function ConfigPage() {
                       : "bg-[#21262d] text-[#8b949e]"
                   }`}
                 >
-                  {t}
+                  {t === "LIMIT" ? "限价" : "市价"}
                 </button>
               ))}
             </div>
@@ -423,16 +423,16 @@ export default function ConfigPage() {
         </div>
       </Section>
 
-      {/* Take Profit / Stop Loss */}
-      <Section title="Take Profit / Stop Loss">
-        <h3 className="text-sm text-[#e6edf3] mb-2">Take Profit Tiers</h3>
+      {/* 止盈 / 止损 */}
+      <Section title="止盈 / 止损">
+        <h3 className="text-sm text-[#e6edf3] mb-2">止盈档位</h3>
         <table className="w-full text-sm mb-3">
           <thead>
             <tr className="text-[#8b949e] border-b border-[#30363d]">
               <th className="text-left py-2 w-12">#</th>
-              <th className="text-left py-2">Profit Trigger %</th>
-              <th className="text-left py-2">Close Ratio %</th>
-              <th className="text-right py-2 w-12">Action</th>
+              <th className="text-left py-2">触发盈利 %</th>
+              <th className="text-left py-2">平仓比例 %</th>
+              <th className="text-right py-2 w-12">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -463,7 +463,7 @@ export default function ConfigPage() {
                     className="text-[#f85149] hover:text-[#f85149]/80 text-xs"
                     disabled={config.tp_tiers.length <= 1}
                   >
-                    Del
+                    删除
                   </button>
                 </td>
               </tr>
@@ -475,40 +475,40 @@ export default function ConfigPage() {
           disabled={config.tp_tiers.length >= 5}
           className="text-[#58a6ff] text-sm hover:underline disabled:text-[#8b949e] mb-4"
         >
-          + Add TP Tier
+          + 添加止盈档
         </button>
 
-        <h3 className="text-sm text-[#e6edf3] mb-2 mt-4">Hard Stop Loss</h3>
+        <h3 className="text-sm text-[#e6edf3] mb-2 mt-4">硬止损</h3>
         <div className="grid grid-cols-2 gap-4">
           <SliderInput
-            label="Margin Loss Stop %"
+            label="保证金亏损止损 %"
             value={config.margin_loss_stop_pct}
             min={50} max={500} step={10}
             onChange={(v) => updateField("margin_loss_stop_pct", v)}
           />
           <SliderInput
-            label="Per Target Loss Stop %"
+            label="单标的亏损止损 %"
             value={config.per_target_loss_stop_pct}
             min={50} max={500} step={10}
             onChange={(v) => updateField("per_target_loss_stop_pct", v)}
           />
           <SliderInput
-            label="Time Stop (hours)"
+            label="时间止损 (小时)"
             value={config.time_stop_hours}
             min={1} max={168} step={1}
             onChange={(v) => updateField("time_stop_hours", v)}
           />
           <SliderInput
-            label="Margin Rate Alert %"
+            label="保证金率预警 %"
             value={config.margin_rate_alert}
             min={100} max={300} step={10}
             onChange={(v) => updateField("margin_rate_alert", v)}
           />
         </div>
 
-        <h3 className="text-sm text-[#e6edf3] mb-2 mt-4">Trailing Stop</h3>
+        <h3 className="text-sm text-[#e6edf3] mb-2 mt-4">追踪止损</h3>
         <div className="flex items-center gap-4 mb-3">
-          <label className="text-[#8b949e] text-xs">Trailing Stop</label>
+          <label className="text-[#8b949e] text-xs">追踪止损</label>
           <button
             onClick={() => updateField("trailing_stop_enabled", !config.trailing_stop_enabled)}
             className={`relative w-10 h-5 rounded-full transition-colors ${
@@ -525,13 +525,13 @@ export default function ConfigPage() {
         {config.trailing_stop_enabled && (
           <div className="grid grid-cols-2 gap-4">
             <SliderInput
-              label="Activation Profit %"
+              label="激活盈利 %"
               value={config.trailing_stop_activation}
               min={50} max={500} step={10}
               onChange={(v) => updateField("trailing_stop_activation", v)}
             />
             <SliderInput
-              label="Callback %"
+              label="回撤比例 %"
               value={config.trailing_stop_callback}
               min={5} max={50} step={5}
               onChange={(v) => updateField("trailing_stop_callback", v)}
@@ -540,51 +540,23 @@ export default function ConfigPage() {
         )}
       </Section>
 
-      {/* Strategy Templates */}
-      <Section title="Strategy Templates">
+      {/* 策略模板 */}
+      <Section title="策略模板">
         <div className="flex gap-2">
-          {["Conservative", "Standard", "Aggressive"].map((name) => (
+          {[{ key: "Conservative", label: "保守" }, { key: "Standard", label: "标准" }, { key: "Aggressive", label: "激进" }].map((item) => (
             <button
-              key={name}
+              key={item.key}
               className="px-4 py-2 bg-[#21262d] text-[#8b949e] rounded text-sm hover:text-[#e6edf3] hover:bg-[#30363d]"
             >
-              {name}
+              {item.label}
             </button>
           ))}
           <button className="px-4 py-2 bg-[#58a6ff]/10 text-[#58a6ff] rounded text-sm hover:bg-[#58a6ff]/20">
-            Save Current
+            保存当前配置
           </button>
         </div>
       </Section>
 
-      {/* Leverage Confirmation Dialog */}
-      {leverageConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-6 max-w-sm">
-            <h3 className="text-[#e6edf3] font-medium mb-2">Confirm Leverage Change</h3>
-            <p className="text-[#8b949e] text-sm mb-4">
-              Change leverage to {pendingLeverage}x? This affects risk exposure significantly.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setLeverageConfirm(false)}
-                className="px-4 py-2 bg-[#21262d] text-[#8b949e] rounded text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  updateField("leverage", pendingLeverage);
-                  setLeverageConfirm(false);
-                }}
-                className="px-4 py-2 bg-[#d29922] text-white rounded text-sm"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

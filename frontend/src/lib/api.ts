@@ -11,11 +11,15 @@ async function request<T>(
   path: string,
   options?: RequestInit
 ): Promise<APIResponse<T>> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    return await res.json();
+  } catch {
+    return { success: false, data: null as T, error: "网络请求失败" };
+  }
 }
 
 export const api = {
@@ -34,8 +38,12 @@ export const api = {
   // Scanner
   getScannerResults: () => request("/scanner/results"),
   getScannerStatus: () => request("/scanner/status"),
-  triggerScanner: (symbol: string) =>
-    request(`/scanner/trigger/${symbol}`, { method: "POST" }),
+  getWatchlist: () => request("/scanner/watchlist"),
+  getSymbolPrice: (symbol: string) => request(`/scanner/price/${symbol}`),
+  previewOrder: (symbol: string, params?: { leverage?: number; margin?: number; order_type?: string }) =>
+    request(`/scanner/preview/${symbol}`, { method: "POST", body: JSON.stringify(params || {}) }),
+  triggerOpen: (symbol: string, params?: { leverage?: number; margin?: number; order_type?: string }) =>
+    request(`/scanner/trigger/${symbol}`, { method: "POST", body: JSON.stringify(params || {}) }),
 
   // Positions
   getPositions: (status?: string) =>
@@ -69,14 +77,20 @@ export const api = {
 };
 
 export function createWebSocket(onMessage: (data: unknown) => void) {
-  const ws = new WebSocket(`${WS_BASE}/stream`);
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-  ws.onclose = () => {
-    // Auto-reconnect after 3 seconds
-    setTimeout(() => createWebSocket(onMessage), 3000);
-  };
-  return ws;
+  try {
+    const ws = new WebSocket(`${WS_BASE}/stream`);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onMessage(data);
+      } catch { /* ignore parse errors */ }
+    };
+    ws.onerror = () => { /* suppress console errors */ };
+    ws.onclose = () => {
+      setTimeout(() => createWebSocket(onMessage), 5000);
+    };
+    return ws;
+  } catch {
+    return null;
+  }
 }

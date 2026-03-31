@@ -1,10 +1,10 @@
 """Binance Futures API wrapper with rate limiting and error handling."""
 
 import asyncio
+import math
 import time
 import structlog
-from decimal import Decimal
-from typing import Any
+from typing import Any, Callable, Coroutine
 
 from binance import AsyncClient, BinanceSocketManager
 from binance.exceptions import BinanceAPIException
@@ -17,15 +17,18 @@ settings = get_settings()
 
 
 class BinanceExchange:
-    """Async wrapper around Binance Futures API with rate limiting."""
+    """Async wrapper around Binance Futures API with rate limiting.
+
+    """
 
     def __init__(self):
         self._client: AsyncClient | None = None
         self._bsm: BinanceSocketManager | None = None
         self._weight_used: int = 0
         self._weight_reset_time: float = time.time()
-        self._max_weight: int = 1800  # Stay under 2400 limit
+        self._max_weight: int = 1800
         self._rate_limited_until: float = 0
+        self._symbol_info: dict[str, dict] = {}
 
     @property
     def connected(self) -> bool:
@@ -42,11 +45,74 @@ class BinanceExchange:
         )
         self._bsm = BinanceSocketManager(self._client)
         logger.info("binance_connected", testnet=settings.binance_testnet)
+        await self._load_symbol_info()
 
     async def disconnect(self):
         if self._client:
             await self._client.close_connection()
             logger.info("binance_disconnected")
+
+    async def _load_symbol_info(self):
+        """Load exchange info to get price/quantity precision for all symbols."""
+        try:
+            info = await self._client.futures_exchange_info()
+            for s in info["symbols"]:
+                symbol = s["symbol"]
+                price_precision = s.get("pricePrecision", 8)
+                qty_precision = s.get("quantityPrecision", 8)
+
+                # Extract filters
+                tick_size = None
+                step_size = None
+                min_qty = None
+                min_notional = None
+                for f in s.get("filters", []):
+                    if f["filterType"] == "PRICE_FILTER":
+                        tick_size = float(f["tickSize"])
+                    elif f["filterType"] == "LOT_SIZE":
+                        step_size = float(f["stepSize"])
+                        min_qty = float(f["minQty"])
+                    elif f["filterType"] == "MIN_NOTIONAL":
+                        min_notional = float(f.get("notional", 0))
+
+                self._symbol_info[symbol] = {
+                    "price_precision": price_precision,
+                    "qty_precision": qty_precision,
+                    "tick_size": tick_size,
+                    "step_size": step_size,
+                    "min_qty": min_qty,
+                    "min_notional": min_notional,
+                }
+            logger.info("symbol_info_loaded", count=len(self._symbol_info))
+        except Exception as e:
+            logger.error("symbol_info_load_failed", error=str(e))
+
+    def format_price(self, symbol: str, price: float) -> str:
+        """Format price to match exchange precision rules."""
+        info = self._symbol_info.get(symbol)
+        if not info:
+            return f"{price:.2f}"
+        precision = info["price_precision"]
+        tick_size = info.get("tick_size")
+        if tick_size and tick_size > 0:
+            price = math.floor(price / tick_size) * tick_size
+        return f"{price:.{precision}f}"
+
+    def format_qty(self, symbol: str, qty: float) -> str:
+        """Format quantity to match exchange precision rules."""
+        info = self._symbol_info.get(symbol)
+        if not info:
+            return f"{qty:.3f}"
+        precision = info["qty_precision"]
+        step_size = info.get("step_size")
+        if step_size and step_size > 0:
+            qty = math.floor(qty / step_size) * step_size
+        return f"{qty:.{precision}f}"
+
+    def get_min_qty(self, symbol: str) -> float:
+        """Get minimum order quantity for a symbol."""
+        info = self._symbol_info.get(symbol)
+        return info["min_qty"] if info and info.get("min_qty") else 0.001
 
     async def _check_rate_limit(self, weight: int = 1):
         now = time.time()
@@ -66,13 +132,24 @@ class BinanceExchange:
             self._weight_reset_time = time.time()
         self._weight_used += weight
 
-    async def _safe_call(self, coro, weight: int = 1, retries: int = 3):
+    async def _safe_call(
+        self,
+        fn: Callable[..., Coroutine],
+        weight: int = 1,
+        retries: int = 3,
+        **kwargs: Any,
+    ):
+        """Call an async API method with rate limiting and retries.
+
+        Usage: await self._safe_call(self._client.futures_ticker, weight=40)
+        Or:    await self._safe_call(self._client.futures_mark_price, weight=1, symbol="BTCUSDT")
+        """
         if not self._client:
             raise RuntimeError("Binance client not connected. Set valid API keys in .env")
         await self._check_rate_limit(weight)
         for attempt in range(retries):
             try:
-                return await coro
+                return await fn(**kwargs)
             except BinanceAPIException as e:
                 if e.code == -1003:  # Rate limit
                     self._rate_limited_until = time.time() + 60
@@ -96,46 +173,46 @@ class BinanceExchange:
 
     async def get_all_tickers(self) -> list[dict]:
         return await self._safe_call(
-            self._client.futures_ticker(), weight=40
+            self._client.futures_ticker, weight=40
         )
 
     async def get_orderbook(self, symbol: str, limit: int = 5) -> dict:
         return await self._safe_call(
-            self._client.futures_order_book(symbol=symbol, limit=limit), weight=2
+            self._client.futures_order_book, weight=2, symbol=symbol, limit=limit
         )
 
     async def get_klines(self, symbol: str, interval: str, limit: int = 15) -> list:
         return await self._safe_call(
-            self._client.futures_klines(symbol=symbol, interval=interval, limit=limit), weight=5
+            self._client.futures_klines, weight=5, symbol=symbol, interval=interval, limit=limit
         )
 
     async def get_mark_price(self, symbol: str) -> dict:
         return await self._safe_call(
-            self._client.futures_mark_price(symbol=symbol), weight=1
+            self._client.futures_mark_price, weight=1, symbol=symbol
         )
 
     # ── Account ──
 
     async def get_account_balance(self) -> list[dict]:
         return await self._safe_call(
-            self._client.futures_account_balance(), weight=5
+            self._client.futures_account_balance, weight=5
         )
 
     async def get_position_risk(self) -> list[dict]:
         return await self._safe_call(
-            self._client.futures_position_information(), weight=5
+            self._client.futures_position_information, weight=5
         )
 
     async def get_account_info(self) -> dict:
         return await self._safe_call(
-            self._client.futures_account(), weight=5
+            self._client.futures_account, weight=5
         )
 
     # ── Trading ──
 
     async def set_leverage(self, symbol: str, leverage: int) -> dict:
         return await self._safe_call(
-            self._client.futures_change_leverage(symbol=symbol, leverage=leverage), weight=1
+            self._client.futures_change_leverage, weight=1, symbol=symbol, leverage=leverage
         )
 
     async def place_limit_order(
@@ -145,16 +222,17 @@ class BinanceExchange:
         quantity: float,
         price: float,
     ) -> dict:
+        formatted_qty = self.format_qty(symbol, quantity)
+        formatted_price = self.format_price(symbol, price)
         return await self._safe_call(
-            self._client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type="LIMIT",
-                timeInForce="GTC",
-                quantity=f"{quantity:.8f}".rstrip("0").rstrip("."),
-                price=f"{price:.8f}".rstrip("0").rstrip("."),
-            ),
+            self._client.futures_create_order,
             weight=1,
+            symbol=symbol,
+            side=side,
+            type="LIMIT",
+            timeInForce="GTC",
+            quantity=formatted_qty,
+            price=formatted_price,
         )
 
     async def place_market_order(
@@ -163,29 +241,29 @@ class BinanceExchange:
         side: str,
         quantity: float,
     ) -> dict:
+        formatted_qty = self.format_qty(symbol, quantity)
         return await self._safe_call(
-            self._client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type="MARKET",
-                quantity=f"{quantity:.8f}".rstrip("0").rstrip("."),
-            ),
+            self._client.futures_create_order,
             weight=1,
+            symbol=symbol,
+            side=side,
+            type="MARKET",
+            quantity=formatted_qty,
         )
 
     async def cancel_order(self, symbol: str, order_id: str) -> dict:
         return await self._safe_call(
-            self._client.futures_cancel_order(symbol=symbol, orderId=order_id), weight=1
+            self._client.futures_cancel_order, weight=1, symbol=symbol, orderId=order_id
         )
 
     async def get_order_status(self, symbol: str, order_id: str) -> dict:
         return await self._safe_call(
-            self._client.futures_get_order(symbol=symbol, orderId=order_id), weight=1
+            self._client.futures_get_order, weight=1, symbol=symbol, orderId=order_id
         )
 
     async def cancel_all_orders(self, symbol: str) -> dict:
         return await self._safe_call(
-            self._client.futures_cancel_all_open_orders(symbol=symbol), weight=1
+            self._client.futures_cancel_all_open_orders, weight=1, symbol=symbol
         )
 
     # ── WebSocket Streams ──
